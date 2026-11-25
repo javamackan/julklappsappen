@@ -1,4 +1,6 @@
 import assert from 'node:assert/strict'
+import { testGifts } from './gifts.mjs'
+import { testPortraits } from './portraits.mjs'
 import { initializeApp, deleteApp } from 'firebase/app'
 import { getAuth, connectAuthEmulator, signInWithEmailAndPassword } from 'firebase/auth'
 import { getFirestore, connectFirestoreEmulator, doc, getDocFromServer, getDocsFromServer, collection, query, where, terminate } from 'firebase/firestore'
@@ -92,6 +94,8 @@ try {
   await assert.rejects(revokeSeat(owner.db, groupId, firstSeat), /redan gått med/)
   await assert.rejects(offer(first.email), /redan med/)
   console.log('Godkänt: medlemskap, gruppgränser, privata mejladresser, samtidiga inbjudningar och inträden, kvot, engångslänkar, utgångstid och återkallelse.')
+  await testGifts({ groupId, otherId: 'annan-' + runId, owner, first, second, stranger, unverified })
+  await testPortraits({ groupId, otherId: 'annan-' + runId, owner, first, second, stranger, unverified })
 } finally {
   await Promise.all(clients.map(async ({ app, db }) => { await terminate(db); await deleteApp(app) }))
 }

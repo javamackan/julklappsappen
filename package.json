@@ -7,6 +7,7 @@
   "scripts": {
     "build": "tsc --noEmit && vite build",
     "dev": "npm run build && firebase emulators:start --only auth,firestore,hosting --project demo-julklappsappen",
+    "test": "npm run test:grupper",
     "test:grupper": "firebase emulators:exec --only auth,firestore --project demo-julklappsappen \"node tests/groups.mjs\"",
     "publicera": "npx --yes firebase-tools@15.37.0 login && npx --yes firebase-tools@15.37.0 deploy --only firestore:rules --project julklappsappen && npx --yes firebase-tools@15.37.0 deploy --only hosting --project julklappsappen"
   },

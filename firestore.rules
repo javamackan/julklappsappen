@@ -40,6 +40,38 @@ service cloud.firestore {
       allow read: if verified() && request.auth.uid in resource.data.memberUids;
       allow update: if verified() && joining();
 
+      // Förslaget får bara läsas av gruppägaren och den avbildade medlemmen.
+      match /portraitSuggestions/{target} {
+        function allowedReader() {
+          return verified() && (request.auth.uid == target || owner()) && bothMembers(groupId, target);
+        }
+        function thumbnail() {
+          let value = request.resource.data;
+          return value.keys().hasOnly(['version', 'image'])
+            && value.version is string && value.version.matches('[a-f0-9-]{36}')
+            && value.image is bytes && value.image.size() > 0 && value.image.size() <= 49152;
+        }
+        allow get: if allowedReader();
+        allow create: if owner() && bothMembers(groupId, target) && thumbnail();
+        allow update: if owner() && bothMembers(groupId, target) && thumbnail()
+          && request.resource.data.version != resource.data.version;
+        allow delete: if allowedReader();
+      }
+
+      match /portraits/{target} {
+        function ownPortrait() {
+          return verified() && request.auth.uid == target && bothMembers(groupId, target);
+        }
+        function accepted() {
+          let proposal = /databases/$(database)/documents/groups/$(groupId)/portraitSuggestions/$(target);
+          return request.resource.data.keys().hasOnly(['image'])
+            && request.resource.data.image == get(proposal).data.image && !existsAfter(proposal);
+        }
+        allow read: if verified() && memberOf(groupId);
+        allow create, update: if ownPortrait() && accepted();
+        allow delete: if ownPortrait();
+      }
+
       match /seats/{slot} {
         function validOffer() {
           let offer = request.resource.data;
@@ -86,6 +118,113 @@ service cloud.firestore {
           || getAfter(seatPath(resource.data.slot)).data.token != code))
           || (verified() && offered() && getAfter(seatPath(resource.data.slot)).data.claimedBy == request.auth.uid);
       }
+    }
+
+    function knownKind(kind) { return kind in ['wishes', 'ideas']; }
+    function memberOf(groupId) {
+      return groupId is string && groupId != ''
+        && request.auth.uid in get(/databases/$(database)/documents/groups/$(groupId)).data.memberUids;
+    }
+    function bothMembers(groupId, target) {
+      let members = get(/databases/$(database)/documents/groups/$(groupId)).data.memberUids;
+      return request.auth.uid in members && target in members;
+    }
+    function visibleGift(item) {
+      return memberOf(item.homeGroup) || memberOf(item.secondaryGroup);
+    }
+    function sharedIn(item, groupId) {
+      return groupId != '' && (item.homeGroup == groupId || item.secondaryGroup == groupId);
+    }
+    function giftPath(target, kind, id) {
+      return /databases/$(database)/documents/lists/$(target)/$(kind)/$(id);
+    }
+    function statePath(target, kind, id) {
+      return /databases/$(database)/documents/lists/$(target)/$(kind)/$(id)/reservation/state;
+    }
+    function claimPath(groupId, target, kind, id) {
+      return /databases/$(database)/documents/groups/$(groupId)/giftLists/$(target)/$(kind)/$(id);
+    }
+    function sackKey(target, kind, id) { return target + '~' + kind + '~' + id; }
+    function sackPath(uid, target, kind, id) {
+      let key = sackKey(target, kind, id);
+      return /databases/$(database)/documents/sacks/$(uid)/items/$(key);
+    }
+    function validContent(v) {
+      return v.title is string && v.title.size() <= 120 && v.details is string && v.details.size() <= 800
+        && v.url is string && v.url.size() <= 2048 && (v.url == '' || v.url.matches('https?://[^/ ].*'))
+        && (v.priceOre == null || (v.priceOre is int && v.priceOre >= 0 && v.priceOre <= 9999999999))
+        && (v.removed ? (v.title == '' && v.details == '' && v.url == '' && v.priceOre == null) : v.title.size() > 0);
+    }
+
+    match /lists/{target}/{kind}/{id} {
+      function canSeeType() {
+        return verified() && knownKind(kind) && (kind == 'wishes' || request.auth.uid != target);
+      }
+      function author(v) {
+        return v.author == request.auth.uid && (kind == 'wishes' ? request.auth.uid == target : request.auth.uid != target);
+      }
+      function validEdit(v) {
+        return !resource.data.removed && v.removed is bool && validContent(v)
+          && v.diff(resource.data).affectedKeys().hasOnly(['title','details','url','priceOre','removed','secondaryGroup'])
+          && (v.secondaryGroup == resource.data.secondaryGroup || (kind == 'wishes'
+            && resource.data.secondaryGroup == '' && v.secondaryGroup != v.homeGroup && bothMembers(v.secondaryGroup, target)));
+      }
+      allow read: if canSeeType() && visibleGift(resource.data);
+      allow create: if canSeeType() && id.matches('[A-Za-z0-9]{20}') && author(request.resource.data)
+        && request.resource.data.keys().hasOnly(['homeGroup','secondaryGroup','author','title','details','url','priceOre','removed','createdAt'])
+        && request.resource.data.createdAt == request.time && request.resource.data.removed == false
+        && request.resource.data.secondaryGroup == '' && validContent(request.resource.data)
+        && bothMembers(request.resource.data.homeGroup, target);
+      allow update: if canSeeType() && author(resource.data) && visibleGift(resource.data) && validEdit(request.resource.data);
+
+      match /reservation/state {
+        function eligible() {
+          return verified() && request.auth.uid != target && knownKind(kind) && visibleGift(get(giftPath(target, kind, id)).data);
+        }
+        function myBag() { return sackPath(request.auth.uid, target, kind, id); }
+        allow get: if eligible();
+        allow create: if eligible() && !get(giftPath(target, kind, id)).data.removed
+          && request.resource.data.keys().hasOnly(['token'])
+          && request.resource.data.token is string && request.resource.data.token.matches('[a-f0-9-]{36}')
+          && !exists(myBag()) && getAfter(myBag()).data.token == request.resource.data.token;
+        allow delete: if verified() && request.auth.uid != target
+          && get(myBag()).data.token == resource.data.token && !existsAfter(myBag());
+      }
+    }
+
+    match /groups/{groupId}/giftLists/{target}/{kind}/{id} {
+      function myBag() { return sackPath(request.auth.uid, target, kind, id); }
+      allow get: if verified() && request.auth.uid != target && knownKind(kind) && bothMembers(groupId, target);
+      allow create: if verified() && knownKind(kind) && request.auth.uid != target && bothMembers(groupId, target)
+        && request.resource.data.keys().hasOnly(['giver','token']) && request.resource.data.giver == request.auth.uid
+        && !exists(statePath(target, kind, id)) && getAfter(statePath(target, kind, id)).data.token == request.resource.data.token
+        && getAfter(myBag()).data.groupId == groupId;
+      allow delete: if verified() && request.auth.uid == resource.data.giver
+        && !existsAfter(myBag()) && !existsAfter(statePath(target, kind, id));
+    }
+
+    match /sacks/{giver}/items/{key} {
+      function mine() { return verified() && request.auth.uid == giver; }
+      function validClaim(v) {
+        let item = get(giftPath(v.recipient, v.kind, v.id)).data;
+        let state = statePath(v.recipient, v.kind, v.id);
+        let local = getAfter(claimPath(v.groupId, v.recipient, v.kind, v.id)).data;
+        return knownKind(v.kind) && key == sackKey(v.recipient, v.kind, v.id) && v.recipient != giver
+          && v.keys().hasOnly(['recipient','kind','id','groupId','token','title','details','url','priceOre','bought'])
+          && bothMembers(v.groupId, v.recipient) && sharedIn(item, v.groupId) && !item.removed
+          && v.title == item.title && v.details == item.details && v.url == item.url && v.priceOre == item.priceOre
+          && v.bought == false && !exists(state) && getAfter(state).data.token == v.token
+          && local.giver == giver && local.token == v.token;
+      }
+      function released(v) {
+        return !existsAfter(statePath(v.recipient, v.kind, v.id))
+          && !existsAfter(claimPath(v.groupId, v.recipient, v.kind, v.id));
+      }
+      allow read: if mine();
+      allow create: if mine() && validClaim(request.resource.data);
+      allow update: if mine() && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['bought'])
+        && request.resource.data.bought is bool;
+      allow delete: if mine() && released(resource.data);
     }
   }
 }

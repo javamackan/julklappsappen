@@ -5,6 +5,10 @@ import {
   sendPasswordResetEmail, signInWithEmailAndPassword, signOut, type Auth, type User,
 } from 'firebase/auth'
 
+import type { Firestore } from 'firebase/firestore'
+import { Groups } from './Groups'
+import { readInviteLink } from './groupData'
+
 type Mode = 'login' | 'register' | 'reset'
 type Notice = { text: string; error?: boolean }
 
@@ -30,8 +34,9 @@ function explainError(error: unknown): string {
   return 'Det gick inte att slutföra just nu. Försök igen om en stund.'
 }
 
-export function Account({ auth }: { auth: Auth }) {
+export function Account({ auth, db }: { auth: Auth; db: Firestore }) {
   const [user, setUser] = useState<User | null>()
+  const [invite, setInvite] = useState(readInviteLink)
   const [mode, setMode] = useState<Mode>('login')
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
@@ -104,10 +109,15 @@ export function Account({ auth }: { auth: Auth }) {
       <div className="paper">
         {user === undefined ? <p role="status">Öppnar ditt konto …</p> : user ? (
           <>
-            <h1>{user.emailVerified ? 'Ditt konto' : 'Bekräfta din mejladress'}</h1>
-            <p className="identity">{user.email}</p>
-            {user.emailVerified ? <p>Mejladressen är bekräftad.</p> : (
+            {user.emailVerified ? (
+              <Groups key={user.uid} db={db} user={user} invite={invite} dismissInvite={() => {
+                window.history.replaceState(null, '', '/')
+                setInvite(null)
+              }} />
+            ) : (
               <>
+                <h1>Bekräfta din mejladress</h1>
+                <p className="identity">{user.email}</p>
                 <p>Öppna länken i bekräftelsemejlet och kom sedan tillbaka hit.</p>
                 <button disabled={busy} onClick={() => checkAddress(user)}>Jag har bekräftat adressen</button>
                 <button className="link" disabled={busy} onClick={() => void perform(async () => {
@@ -116,6 +126,7 @@ export function Account({ auth }: { auth: Auth }) {
                 })}>Skicka nytt bekräftelsemejl</button>
               </>
             )}
+            {user.emailVerified && <p className="account-address">{user.email}</p>}
             <button className="link" disabled={busy} onClick={() => void perform(async () => {
               await signOut(auth)
               setEmail('')
@@ -125,6 +136,7 @@ export function Account({ auth }: { auth: Auth }) {
         ) : (
           <>
             <h1>{titles[mode]}</h1>
+            {invite && mode !== 'reset' && <p>Du har fått en gruppinbjudan. Använd mejladressen som du blev inbjuden med.</p>}
             {mode === 'reset' && <p>Skriv din mejladress så kan du få en länk för att välja ett nytt lösenord.</p>}
             <form onSubmit={submit}>
               <label htmlFor="email">Mejladress</label>
@@ -147,7 +159,7 @@ export function Account({ auth }: { auth: Auth }) {
             </nav>
           </>
         )}
-        {notice && <p role={notice.error ? 'alert' : 'status'} className={notice.error ? 'notice error' : 'notice'}>{notice.text}</p>}
+        {notice && (!user?.emailVerified || notice.error) && <p role={notice.error ? 'alert' : 'status'} className={notice.error ? 'notice error' : 'notice'}>{notice.text}</p>}
       </div>
     </main>
   )

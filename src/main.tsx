@@ -2,12 +2,12 @@ import { createRoot } from 'react-dom/client'
 import '@fontsource-variable/nunito'
 import './style.css'
 import { Account } from './Account'
-import { startAuth } from './firebase'
+import { startFirebase } from './firebase'
 
 const root = createRoot(document.getElementById('root')!)
 root.render(<main className="loading" role="status">Öppnar Julklappsappen …</main>)
-startAuth().then(auth => {
-  root.render(<Account auth={auth} />)
+startFirebase().then(({ auth, db }) => {
+  root.render(<Account auth={auth} db={db} />)
 }).catch(() => {
   root.render(
     <main className="loading">

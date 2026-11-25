@@ -1,7 +1,8 @@
 import { initializeApp, type FirebaseOptions } from 'firebase/app'
 import { connectAuthEmulator, getAuth } from 'firebase/auth'
+import { connectFirestoreEmulator, getFirestore } from 'firebase/firestore'
 
-export async function startAuth() {
+export async function startFirebase() {
   const local = ['localhost', '127.0.0.1', '[::1]'].includes(window.location.hostname)
   let config: FirebaseOptions
   if (local) {
@@ -20,8 +21,13 @@ export async function startAuth() {
       throw new Error('Firebase-konfigurationen är ofullständig.')
     }
   }
-  const auth = getAuth(initializeApp(config))
-  if (local) connectAuthEmulator(auth, 'http://127.0.0.1:9099', { disableWarnings: true })
+  const app = initializeApp(config)
+  const auth = getAuth(app)
+  const db = getFirestore(app)
+  if (local) {
+    connectAuthEmulator(auth, 'http://127.0.0.1:9099', { disableWarnings: true })
+    connectFirestoreEmulator(db, '127.0.0.1', 8080)
+  }
   auth.languageCode = 'sv'
-  return auth
+  return { auth, db }
 }

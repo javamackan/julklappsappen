@@ -1,9 +1,91 @@
 rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
-    // Familjedata blir tillgängliga när gruppmedlemskap införs.
-    match /{document=**} {
-      allow read, write: if false;
+    function verified() {
+      return request.auth != null && request.auth.token.email_verified == true
+        && request.auth.token.email is string;
+    }
+    match /groups/{groupId} {
+      function groupPath() {
+        return /databases/$(database)/documents/groups/$(groupId);
+      }
+      function seatPath(id) {
+        return /databases/$(database)/documents/groups/$(groupId)/seats/$(id);
+      }
+      function invitePath(code) {
+        return /databases/$(database)/documents/groups/$(groupId)/invitations/$(code);
+      }
+      function owner() {
+        return verified() && get(groupPath()).data.ownerUid == request.auth.uid;
+      }
+      function recipient(seat) {
+        return verified() && seat.claimedBy == '' && seat.expiresAt > request.time
+          && seat.email == request.auth.token.email.lower();
+      }
+      function joining() {
+        let uid = request.auth.uid;
+        let before = resource.data;
+        let after = request.resource.data;
+        let member = after.members[uid];
+        let seat = seatPath(member.slot);
+        return !(uid in before.memberUids) && before.memberUids.size() < before.capacity
+          && after.diff(before).affectedKeys().hasOnly(['memberUids', 'members'])
+          && after.memberUids == before.memberUids.concat([uid])
+          && after.members.diff(before.members).affectedKeys().hasOnly([uid])
+          && member.keys().hasAll(['name', 'slot']) && member.keys().hasOnly(['name', 'slot'])
+          && member.name is string && member.name.size() > 0 && member.name.size() <= 50
+          && recipient(get(seat).data) && getAfter(seat).data.claimedBy == uid;
+      }
+      // Endast projektadministrationen skapar grupper under familjepiloten.
+      allow read: if verified() && request.auth.uid in resource.data.memberUids;
+      allow update: if verified() && joining();
+
+      match /seats/{slot} {
+        function validOffer() {
+          let offer = request.resource.data;
+          let group = get(groupPath()).data;
+          return slot.matches('[1-9][0-9]*') && int(slot) < group.capacity
+            && offer.keys().hasAll(['token', 'email', 'expiresAt', 'claimedBy'])
+            && offer.keys().hasOnly(['token', 'email', 'expiresAt', 'claimedBy'])
+            && offer.token is string && offer.token.matches('[a-f0-9]{48}')
+            && offer.email is string && offer.email.size() <= 254
+            && offer.email.matches('[^@ ]+@[^@ ]+[.][^@ ]+') && offer.email == offer.email.lower()
+            && offer.email != request.auth.token.email.lower() && offer.claimedBy == ''
+            && offer.expiresAt > request.time && offer.expiresAt <= request.time + duration.value(8, 'd')
+            && getAfter(invitePath(offer.token)).data.slot == slot;
+        }
+        function claim() {
+          let uid = request.auth.uid;
+          let invite = invitePath(resource.data.token);
+          let group = getAfter(groupPath()).data;
+          return recipient(resource.data) && request.resource.data.claimedBy == uid
+            && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['claimedBy'])
+            && !(uid in get(groupPath()).data.memberUids) && uid in group.memberUids
+            && group.members[uid].slot == slot && exists(invite) && !existsAfter(invite);
+        }
+        allow read: if owner();
+        allow create: if owner() && validOffer();
+        allow update: if claim() || (owner() && resource.data.claimedBy == ''
+          && resource.data.expiresAt <= request.time && validOffer()
+          && request.resource.data.token != resource.data.token && !existsAfter(invitePath(resource.data.token)));
+        allow delete: if owner() && resource.data.claimedBy == '' && !existsAfter(invitePath(resource.data.token));
+      }
+
+      match /invitations/{code} {
+        function offered() {
+          let seat = get(seatPath(resource.data.slot)).data;
+          return seat.token == code && recipient(seat);
+        }
+        allow get: if owner() || (verified() && offered());
+        allow list: if owner();
+        allow create: if owner() && code.matches('[a-f0-9]{48}')
+          && request.resource.data.keys().hasOnly(['slot', 'groupName'])
+          && request.resource.data.groupName == get(groupPath()).data.name
+          && getAfter(seatPath(request.resource.data.slot)).data.token == code;
+        allow delete: if (owner() && (!existsAfter(seatPath(resource.data.slot))
+          || getAfter(seatPath(resource.data.slot)).data.token != code))
+          || (verified() && offered() && getAfter(seatPath(resource.data.slot)).data.claimedBy == request.auth.uid);
+      }
     }
   }
 }

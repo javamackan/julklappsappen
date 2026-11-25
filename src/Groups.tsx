@@ -1,5 +1,8 @@
 import { useEffect, useState, type FormEvent } from 'react'
 import type { User } from 'firebase/auth'
+import { GiftDesk } from './GiftDesk'
+import { GroupPortraits, OwnPortrait, Members } from './Portraits'
+import { GiftEffects, SoundButton } from './Festivity'
 import type { Firestore } from 'firebase/firestore'
 import {
   acceptInvitation, InviteProblem, inviteUrl, offerSeat, readInvitation, revokeSeat, watchGroups, watchSeats,
@@ -190,18 +193,15 @@ export function Groups({ db, user, invite, dismissInvite }: { db: Firestore; use
         {groups.map(g => <option key={g.id} value={g.id}>{g.name}</option>)}
       </select>
     </label>}
-    <h1>{group.name}</h1>
-    <section aria-labelledby="member-title">
-      <h2 id="member-title">Medlemmar <span className="member-count">{group.memberUids.length} av {group.capacity}</span></h2>
-      <ul className="member-list">{group.memberUids.map(uid => {
-        const member = group.members[uid]
-        return <li key={uid}>
-          <span aria-hidden="true" className="initial">{member.name.charAt(0).toLocaleUpperCase('sv')}</span>
-          <span>{member.name}{uid === user.uid && <small> · du</small>}</span>
-          {uid === group.ownerUid && <small className="owner-label">Gruppägare</small>}
-        </li>
-      })}</ul>
-    </section>
-    {group.ownerUid === user.uid && <GroupInvites key={group.id} db={db} group={group} address={user.email ?? ''} />}
+    <GroupPortraits key={group.id} db={db} groupId={group.id}><GiftEffects>
+    <div className="group-heading"><h1 className="group-title">{group.name}</h1><SoundButton /></div>
+    <OwnPortrait db={db} group={group} uid={user.uid} />
+    <GiftDesk key={group.id} db={db} group={group} uid={user.uid} />
+    <details key={'settings-' + group.id} className="group-panel">
+      <summary>{group.ownerUid === user.uid ? 'Grupp och inbjudningar' : 'Gruppmedlemmar'}</summary>
+      <Members db={db} group={group} uid={user.uid} />
+      {group.ownerUid === user.uid && <GroupInvites key={group.id} db={db} group={group} address={user.email ?? ''} />}
+    </details>
+    </GiftEffects></GroupPortraits>
   </>
 }

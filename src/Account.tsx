@@ -7,6 +7,7 @@ import {
 
 import type { Firestore } from 'firebase/firestore'
 import { Groups } from './Groups'
+import { Julby } from './Julby'
 import { readInviteLink } from './groupData'
 
 type Mode = 'login' | 'register' | 'reset'
@@ -74,7 +75,7 @@ export function Account({ auth, db }: { auth: Auth; db: Firestore }) {
         } catch (error) {
           if (!(error instanceof FirebaseError && error.code === 'auth/user-not-found')) throw error
         }
-        setNotice({ text: 'Om adressen har ett konto får du ett mejl med en länk för att välja ett nytt lösenord.' })
+        setNotice({ text: 'Om adressen har ett konto får du ett mejl med en länk för att välja ett nytt lösenord. Titta även i skräpposten.' })
         return
       }
       if (mode === 'login') {
@@ -105,7 +106,7 @@ export function Account({ auth, db }: { auth: Auth; db: Firestore }) {
 
   return (
     <main className="card">
-      <header className="julby"><img src="/julby.webp" alt="Julklappsappen" /></header>
+      <Julby />
       <div className="paper">
         {user === undefined ? <p role="status">Öppnar ditt konto …</p> : user ? (
           <>
@@ -118,7 +119,7 @@ export function Account({ auth, db }: { auth: Auth; db: Firestore }) {
               <>
                 <h1>Bekräfta din mejladress</h1>
                 <p className="identity">{user.email}</p>
-                <p>Öppna länken i bekräftelsemejlet och kom sedan tillbaka hit.</p>
+                <p>Öppna länken i bekräftelsemejlet och kom sedan tillbaka hit. Saknas mejlet i inkorgen? Titta i skräpposten.</p>
                 <button disabled={busy} onClick={() => checkAddress(user)}>Jag har bekräftat adressen</button>
                 <button className="link" disabled={busy} onClick={() => void perform(async () => {
                   await sendEmailVerification(user)

@@ -1,0 +1,43 @@
+.julby { position: relative; margin: 0; aspect-ratio: 1024 / 308; overflow: hidden; background: #e5e8db; }
+.vinterby { display: block; width: 100%; height: 100%; }
+.pepparkaksgubbe {
+  position: absolute; inset: 0 auto 0 0; width: 32%; min-height: 0; padding: 0;
+  border: 0; border-radius: 0; background: none; box-shadow: none; cursor: pointer;
+  touch-action: manipulation; -webkit-tap-highlight-color: transparent;
+}
+.pepparkaksgubbe:active { transform: none; }
+.pepparkaksgubbe:focus-visible { outline: 3px solid #fff0a8; outline-offset: -4px; border-radius: 12px; }
+.kakscen { position: absolute; inset: 0; pointer-events: none; }
+.halsduk { position: absolute; left: 0; top: 79.54545%; width: 32.34863%; transform-origin: 71.7% 6.34%; }
+.kaksmula {
+  position: absolute; left: 30.2%; top: 54%; width: 4.4%; aspect-ratio: 1.25;
+  background: radial-gradient(at 32% 25%,#ffce78,#b66323 60%,#713419);
+  clip-path: polygon(22% 0,77% 11%,100% 64%,61% 100%,0 73%,5% 29%); opacity: 0;
+}
+.sopklocka { animation: sopklar 1.45s linear; }
+@keyframes sopklar { from { opacity: 0; } to { opacity: 1; } }
+@media (prefers-reduced-motion: no-preference) {
+  .sopar .kaksmula { animation: smulfard 1.45s linear both; }
+  .sopar .halsduk { animation: halsdukssvep 1.45s ease-in-out both; }
+  @keyframes smulfard {
+    0% { opacity: 0; }
+    5% { opacity: 1; }
+    16% { left: 44%; top: 47%; transform: rotate(70deg); }
+    35% { left: 57%; top: 93%; transform: rotate(165deg); }
+    40% { left: 58%; top: 89%; }
+    46%, 63% { left: 59%; top: 93%; opacity: 1; transform: rotate(195deg); }
+    73% { left: 83%; top: 75%; opacity: 1; }
+    87%, 100% { left: 100%; top: 91%; opacity: 0; transform: rotate(340deg); }
+  }
+  @keyframes halsdukssvep {
+    0%, 36%, 100% { transform: rotate(0); }
+    44% { transform: rotate(9deg); }
+    65% { transform: rotate(-88deg); }
+    74% { transform: rotate(-105deg); }
+    92% { transform: rotate(5deg); }
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .sopar .kaksmula { left: 59%; top: 93%; opacity: 1; }
+  .sopklocka { animation-duration: .5s; }
+}

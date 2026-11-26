@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict'
-import { Bytes, collection, doc, getDocFromServer, getDocsFromServer, setDoc, writeBatch } from 'firebase/firestore'
+import { Bytes, collection, doc, getDocFromServer, getDocsFromServer, setDoc } from 'firebase/firestore'
 import { choosePortrait, maxPortraitBytes, proposePortrait } from '../src/portraitData.ts'
 
 export async function testPortraits({ groupId, otherId, owner, first, second, stranger, unverified }) {
@@ -19,13 +19,13 @@ export async function testPortraits({ groupId, otherId, owner, first, second, st
   const older = await suggestion()
   for (const who of [second, stranger, unverified]) await assert.rejects(getDocFromServer(pending(who)), denied)
   await assert.rejects(getDocsFromServer(collection(second.db, 'groups', groupId, 'portraitSuggestions')), denied)
-  assert.equal((await getDocFromServer(shown(second))).exists(), false)
+  assert.ok((await getDocFromServer(shown(second))).exists())
   await assert.rejects(choosePortrait(owner.db, groupId, first.uid, older, 'accept'), denied)
-  await assert.rejects(setDoc(shown(first), { image: img }), denied)
-  const forged = writeBatch(first.db)
-  forged.set(shown(first), { image: replacement })
-  forged.delete(pending(first))
-  await assert.rejects(forged.commit(), denied)
+  await assert.rejects(setDoc(shown(second), { image: img }), denied)
+  await assert.rejects(setDoc(shown(stranger, groupId, stranger.uid), { image: replacement }), denied)
+  await assert.rejects(setDoc(shown(first), { image: Bytes.fromUint8Array(new Uint8Array(maxPortraitBytes + 1)) }), denied)
+  await setDoc(shown(first), { image: replacement })
+  assert.ok((await getDocFromServer(shown(second))).get('image').isEqual(replacement))
 
   await propose(owner, replacement)
   await assert.rejects(choosePortrait(first.db, groupId, first.uid, older, 'accept'), /ändrats/)

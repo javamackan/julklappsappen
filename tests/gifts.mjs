@@ -77,7 +77,7 @@ export async function testGifts({ groupId, otherId, owner, first, second, strang
   await releaseGift(second.db, second.uid, surprise)
 
   const otherGroup = { ...(await getDocFromServer(doc(stranger.db, 'groups', otherId))).data(), id: otherId }
-  await offerSeat(stranger.db, otherGroup, owner.email, stranger.email)
+  await offerSeat(stranger.db, otherGroup, owner.email, stranger.email, 'Alex')
   const seat = (await getDocsFromServer(collection(stranger.db, 'groups', otherId, 'seats'))).docs.find(d => d.get('email') === owner.email)
   const link = { groupId: otherId, token: seat.get('token') }
   await acceptInvitation(owner.db, link, await readInvitation(owner.db, link), owner.uid, 'Alex')

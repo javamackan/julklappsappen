@@ -3,7 +3,7 @@ import { testGifts } from './gifts.mjs'
 import { testPortraits } from './portraits.mjs'
 import { initializeApp, deleteApp } from 'firebase/app'
 import { getAuth, connectAuthEmulator, signInWithEmailAndPassword } from 'firebase/auth'
-import { getFirestore, connectFirestoreEmulator, doc, getDocFromServer, getDocsFromServer, collection, query, where, terminate } from 'firebase/firestore'
+import { Bytes, getFirestore, connectFirestoreEmulator, doc, getDocFromServer, getDocsFromServer, collection, query, where, terminate } from 'firebase/firestore'
 import { acceptInvitation, offerSeat, readInvitation, revokeSeat } from '../src/groupData.ts'
 
 const project = 'demo-julklappsappen'
@@ -50,7 +50,11 @@ try {
   await request(dbUrl + 'groups/annan-' + runId, 'PATCH', groupFields('Annan grupp', 9, stranger))
   const groupRef = doc(owner.db, 'groups', groupId)
   const group = { ...(await getDocFromServer(groupRef)).data(), id: groupId }
-  function offer(address) { return offerSeat(owner.db, group, address, owner.email) }
+  const picture = Bytes.fromUint8Array(new Uint8Array([255, 216, 255, 217]))
+  function offer(address, image = picture) {
+    const name = address.toLowerCase() === first.email ? 'Kim' : 'Robin'
+    return offerSeat(owner.db, group, address, owner.email, name, image)
+  }
   async function seats() {
     const s = await getDocsFromServer(collection(groupRef, 'seats'))
     return s.docs.map(d => ({ ...d.data(), slot: d.id }))
@@ -60,6 +64,7 @@ try {
   assert.deepEqual((await getDocsFromServer(query(collection(owner.db, 'groups'), where('memberUids', 'array-contains', owner.uid)))).docs.map(d => d.id), [groupId])
   await assert.rejects(getDocFromServer(doc(first.db, 'groups', groupId)), denied)
   await assert.rejects(offer(owner.email), /redan med/)
+  await assert.rejects(offer(first.email, Bytes.fromUint8Array(new Uint8Array(49153))), denied)
   await Promise.all([offer(first.email), offer(first.email.toUpperCase())])
   assert.equal((await seats()).length, 1)
   let [firstSeat] = await seats()
@@ -80,12 +85,19 @@ try {
   assert.ok(secondSeat)
   assert.ok(!(await getDocFromServer(doc(groupRef, 'invitations', blocked.token))).exists())
   const one = await readInvitation(first.db, link(firstSeat))
+  assert.equal(one.displayName, 'Kim')
+  assert.ok(one.portrait.isEqual(picture))
+  await assert.rejects(acceptInvitation(first.db, link(firstSeat), one, first.uid, 'Annat namn', picture), denied)
+  // En redan utskickad länk från den föregående versionen saknar namn och bild.
+  await request(dbUrl + 'groups/' + groupId + '/invitations/' + secondSeat.token + '?updateMask.fieldPaths=portrait&updateMask.fieldPaths=displayName', 'PATCH', { fields: {} })
   const two = await readInvitation(second.db, link(secondSeat))
   await assert.rejects(getDocFromServer(doc(first.db, 'groups', groupId)), denied)
   await Promise.all([
-    acceptInvitation(first.db, link(firstSeat), one, first.uid, 'Kim'),
+    acceptInvitation(first.db, link(firstSeat), one, first.uid, 'Kim', picture),
     acceptInvitation(second.db, link(secondSeat), two, second.uid, 'Robin'),
   ])
+  assert.ok((await getDocFromServer(doc(second.db, 'groups', groupId, 'portraits', first.uid))).get('image').isEqual(picture))
+  assert.equal((await getDocFromServer(doc(first.db, 'groups', groupId, 'portraits', second.uid))).exists(), false)
   const joined = (await getDocFromServer(doc(first.db, 'groups', groupId))).data()
   assert.deepEqual(new Set(joined.memberUids), new Set([owner.uid, first.uid, second.uid]))
   assert.equal(joined.members[first.uid].name, 'Kim')

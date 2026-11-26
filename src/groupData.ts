@@ -1,6 +1,6 @@
 import {
   arrayUnion, collection, doc, FieldPath, getDocFromServer, onSnapshot, query,
-  runTransaction, Timestamp, where, writeBatch, type Firestore, type FirestoreError,
+  runTransaction, Timestamp, where, writeBatch, type Bytes, type Firestore, type FirestoreError,
 } from 'firebase/firestore'
 
 export type FamilyGroup = {
@@ -11,9 +11,9 @@ export type FamilyGroup = {
   memberUids: string[]
   members: Record<string, { name: string; slot: string }>
 }
-export type Seat = { slot: string; email: string; token: string; expiresAt: Timestamp; claimedBy: string }
+export type Seat = { displayName?: string; slot: string; email: string; token: string; expiresAt: Timestamp; claimedBy: string }
 export type InviteLink = { groupId: string; token: string }
-export type Invitation = { groupName: string; slot: string }
+export type Invitation = { displayName?: string; portrait?: Bytes; groupName: string; slot: string }
 
 export function readInviteLink(): InviteLink | null {
   const match = /^\/bjud-in\/([a-zA-Z0-9_-]+)\/?$/.exec(window.location.pathname)
@@ -42,7 +42,9 @@ export function watchSeats(db: Firestore, groupId: string, next: (seats: Seat[])
 const week = 7 * 24 * 60 * 60 * 1000
 export class InviteProblem extends Error {}
 
-export async function offerSeat(db: Firestore, group: FamilyGroup, address: string, ownerAddress: string) {
+export async function offerSeat(db: Firestore, group: FamilyGroup, address: string, ownerAddress: string, displayName: string, portrait?: Bytes) {
+  const name = displayName.trim()
+  if (!name || name.length > 50) throw new InviteProblem('Skriv ett visningsnamn med högst 50 tecken.')
   const email = address.trim().toLowerCase()
   if (email === ownerAddress.toLowerCase()) throw new InviteProblem('Du är redan med i gruppen.')
   const base = doc(db, 'groups', group.id)
@@ -58,8 +60,8 @@ export async function offerSeat(db: Firestore, group: FamilyGroup, address: stri
       ?? snapshots.find(s => !s.get('claimedBy') && s.get('expiresAt').toMillis() <= now)
     if (!seat) throw new InviteProblem('Alla platser har en medlem eller en giltig inbjudan.')
     if (seat.exists()) transaction.delete(doc(base, 'invitations', seat.get('token')))
-    transaction.set(seat.ref, { email, token, expiresAt: Timestamp.fromMillis(now + week), claimedBy: '' })
-    transaction.set(doc(base, 'invitations', token), { slot: seat.id, groupName: group.name })
+    transaction.set(seat.ref, { displayName: name, email, token, expiresAt: Timestamp.fromMillis(now + week), claimedBy: '' })
+    transaction.set(doc(base, 'invitations', token), { slot: seat.id, groupName: group.name, displayName: name, ...(portrait && { portrait }) })
     return true
   })
 }
@@ -82,13 +84,14 @@ export async function readInvitation(db: Firestore, link: InviteLink): Promise<I
   return snapshot.data() as Invitation
 }
 
-export async function acceptInvitation(db: Firestore, link: InviteLink, invitation: Invitation, uid: string, displayName: string) {
+export async function acceptInvitation(db: Firestore, link: InviteLink, invitation: Invitation, uid: string, displayName: string, portrait?: Bytes) {
   const name = displayName.trim()
   if (!name || name.length > 50) throw new InviteProblem('Skriv ett namn med högst 50 tecken.')
   const group = doc(db, 'groups', link.groupId)
   const batch = writeBatch(db)
   batch.update(group, 'memberUids', arrayUnion(uid), new FieldPath('members', uid), { name, slot: invitation.slot })
   batch.update(doc(group, 'seats', invitation.slot), { claimedBy: uid })
+  if (portrait) batch.set(doc(group, 'portraits', uid), { image: portrait })
   batch.delete(doc(group, 'invitations', link.token))
   await batch.commit()
 }

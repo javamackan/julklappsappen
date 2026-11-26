@@ -1,4 +1,4 @@
-import { useEffect, useState, type DependencyList } from 'react'
+import { useEffect, useLayoutEffect, useRef, useState, type DependencyList } from 'react'
 import type { Firestore } from 'firebase/firestore'
 import type { FamilyGroup } from './groupData'
 import {
@@ -155,21 +155,34 @@ function Sack({ db, group, uid }: Desk) {
 }
 
 function FamilyLists({ db, group, uid, openBag }: Desk & { openBag: () => void }) {
-  const others = group.memberUids.filter(u => u !== uid)
-  const [chosen, setChosen] = useState('')
-  const recipient = others.includes(chosen) ? chosen : others[0]
-  if (!recipient) return <section className="gift-section"><h2>Familjens listor</h2>
-    <p className="empty-state">Du är först i gruppen. Här dyker familjens önskelistor upp när fler har gått med.</p></section>
+  const [recipient, setRecipient] = useState('')
+  const strip = useRef<HTMLDivElement>(null)
+  useLayoutEffect(() => {
+    const row = strip.current
+    const button = row?.querySelector<HTMLButtonElement>('[aria-expanded="true"]')
+    if (!row || !button) return
+    const offset = button.getBoundingClientRect().left - row.getBoundingClientRect().left
+    row.scrollLeft += offset - (row.clientWidth - button.offsetWidth) / 2
+  }, [recipient])
+  function overview() {
+    const current = strip.current?.querySelector<HTMLButtonElement>('[aria-expanded="true"]')
+    setRecipient('')
+    current?.focus({ preventScroll: true })
+  }
   return <section className="family-section">
-    <h2>Familjens listor</h2>
-    <label className="member-picker">Vems lista vill du öppna?
-      <select value={recipient} onChange={e => setChosen(e.target.value)}>{others.map(id =>
-        <option key={id} value={id}>{group.members[id].name}</option>)}</select>
-    </label>
-    <div key={recipient}>
-      <GiftList {...{ db, group, uid, recipient, openBag }} kind="wishes" />
-      <GiftList {...{ db, group, uid, recipient, openBag }} kind="ideas" />
+    <div className="family-heading"><h2>Familjens listor</h2>
+      {recipient && <button className="link" onClick={overview}>Alla medlemmar</button>}
     </div>
+    <div ref={strip} className={'family-people' + (recipient ? ' compact' : '')} role="group" aria-label="Välj en önskelista">
+      {group.memberUids.map(id => <button key={id} className="family-person" aria-expanded={recipient === id}
+        aria-controls="family-wishes" onClick={() => setRecipient(id === recipient ? '' : id)}>
+        <Avatar uid={id} /><span>{group.members[id].name}{id === uid && <small> (du)</small>}</span>
+      </button>)}
+    </div>
+    <div id="family-wishes">{recipient && <div key={recipient} className="family-detail">
+      <GiftList {...{ db, group, uid, recipient, openBag }} kind="wishes" />
+      {recipient !== uid && <GiftList {...{ db, group, uid, recipient, openBag }} kind="ideas" />}
+    </div>}</div>
   </section>
 }
 

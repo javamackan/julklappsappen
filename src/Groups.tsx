@@ -1,9 +1,10 @@
 import { useEffect, useState, type FormEvent } from 'react'
 import type { User } from 'firebase/auth'
 import { GiftDesk } from './GiftDesk'
-import { GroupPortraits, OwnPortrait, Members } from './Portraits'
+import { GroupPortraits, OwnPortrait, Members, PortraitEditor } from './Portraits'
 import { GiftEffects, SoundButton } from './Festivity'
-import type { Firestore } from 'firebase/firestore'
+import { portraitSrc } from './portraitData'
+import type { Bytes, Firestore } from 'firebase/firestore'
 import {
   acceptInvitation, InviteProblem, inviteUrl, offerSeat, readInvitation, revokeSeat, watchGroups, watchSeats,
   type FamilyGroup, type Invitation, type InviteLink, type Seat,
@@ -23,9 +24,30 @@ function inviteError(error: unknown) {
   return code === 'permission-denied' || code === 'not-found' ? unavailable : 'Kontrollera anslutningen och försök igen.'
 }
 
+function PortraitChoice({ name, picture, proposed, editing, setEditing, change, busy, inviting }: {
+  name: string; picture?: Bytes; proposed?: Bytes; editing: boolean; setEditing: (value: boolean) => void
+  change: (image?: Bytes) => void; busy: boolean; inviting?: boolean
+}) {
+  return <div className="invite-portrait">
+    <img className="invite-preview" alt={picture ? 'Valt porträtt' : 'Pepparkakan'} src={picture ? portraitSrc(picture) : '/julikoner/pepparkaka.webp'} />
+    <div><strong>{inviting ? 'Porträttförslag (valfritt)' : 'Ditt porträtt i gruppen'}</strong>
+      {!inviting && proposed && <p>Gruppägaren har föreslagit ett porträtt. Välj vilken bild familjen ska se.</p>}
+      {!editing && <div className="portrait-actions">
+        <button type="button" className="link" disabled={busy} onClick={() => setEditing(true)}>{inviting ? (picture ? 'Byt bild' : 'Lägg till porträtt') : 'Ladda upp egen bild'}</button>
+        {picture && <button type="button" className="link" disabled={busy} onClick={() => change(undefined)}>{inviting ? 'Ta bort förslaget' : 'Använd pepparkakan'}</button>}
+        {proposed && !picture?.isEqual(proposed) && <button type="button" className="link" disabled={busy} onClick={() => change(proposed)}>Återgå till förslaget</button>}
+      </div>}
+    </div>
+    {editing && <PortraitEditor name={name || 'den inbjudna'} label="Använd bilden" close={() => setEditing(false)}
+      onSave={image => { change(image); setEditing(false) }} />}
+  </div>
+}
+
 function JoinGroup({ db, user, link, leave }: { db: Firestore; user: User; link: InviteLink; leave: () => void }) {
   const [invitation, setInvitation] = useState<Invitation | null>(null)
   const [name, setName] = useState(user.displayName ?? '')
+  const [picture, setPicture] = useState<Bytes>()
+  const [editing, setEditing] = useState(false)
   const [feedback, setFeedback] = useState<Feedback | null>(null)
   const [busy, setBusy] = useState(false)
   const [attempt, setAttempt] = useState(0)
@@ -33,18 +55,18 @@ function JoinGroup({ db, user, link, leave }: { db: Firestore; user: User; link:
   useEffect(() => {
     let active = true
     setFeedback(null)
-    readInvitation(db, link).then(data => { if (active) setInvitation(data) })
+    readInvitation(db, link).then(data => { if (active) { setInvitation(data); setPicture(data.portrait); setName(data.displayName ?? user.displayName ?? '') } })
       .catch(error => { if (active) setFeedback({ text: inviteError(error), error: true }) })
     return () => { active = false }
-  }, [db, link, attempt])
+  }, [db, link, attempt, user.displayName])
 
   async function join(event: FormEvent) {
     event.preventDefault()
-    if (!invitation || busy) return
+    if (!invitation || busy || editing) return
     setBusy(true)
     setFeedback(null)
     try {
-      await acceptInvitation(db, link, invitation, user.uid, name)
+      await acceptInvitation(db, link, invitation, user.uid, name, picture)
       leave()
     } catch (error) {
       setFeedback({ text: inviteError(error), error: true })
@@ -56,9 +78,10 @@ function JoinGroup({ db, user, link, leave }: { db: Firestore; user: User; link:
   return <>
     <h1>{invitation ? 'Välkommen till ' + invitation.groupName + '!' : 'Din gruppinbjudan'}</h1>
     {invitation ? <form onSubmit={join}>
-      <label htmlFor="member-name">Vad vill du kallas i gruppen?</label>
-      <input id="member-name" autoComplete="given-name" maxLength={50} required value={name} onChange={e => setName(e.target.value)} />
-      <button disabled={busy || !name.trim()}>Gå med i gruppen</button>
+      {invitation.displayName ? <p>Du är inbjuden som <strong>{invitation.displayName}</strong>.</p> : <><label htmlFor="member-name">Vad vill du kallas i gruppen?</label>
+      <input id="member-name" autoComplete="given-name" maxLength={50} required value={name} onChange={e => setName(e.target.value)} /></>}
+      <PortraitChoice {...{ name, picture, editing, setEditing, busy }} proposed={invitation.portrait} change={setPicture} />
+      <button disabled={busy || editing || !name.trim()}>{picture && invitation.portrait?.isEqual(picture) ? 'Godkänn porträtt och gå med' : 'Gå med i gruppen'}</button>
     </form> : !feedback && <p role="status">Hämtar din inbjudan …</p>}
     <Message value={feedback} />
     {!invitation && feedback && <button className="link" onClick={() => setAttempt(v => v + 1)}>Försök igen</button>}
@@ -71,6 +94,9 @@ const expiryFormat = new Intl.DateTimeFormat('sv-SE', { day: 'numeric', month: '
 function GroupInvites({ db, group, address }: { db: Firestore; group: FamilyGroup; address: string }) {
   const [seats, setSeats] = useState<Seat[] | null>(null)
   const [email, setEmail] = useState('')
+  const [name, setName] = useState('')
+  const [picture, setPicture] = useState<Bytes>()
+  const [editing, setEditing] = useState(false)
   const [feedback, setFeedback] = useState<Feedback | null>(null)
   const [manualCopy, setManualCopy] = useState('')
   const [busy, setBusy] = useState(false)
@@ -89,14 +115,14 @@ function GroupInvites({ db, group, address }: { db: Firestore; group: FamilyGrou
 
   async function create(event: FormEvent) {
     event.preventDefault()
-    if (busy) return
+    if (busy || editing) return
     setBusy(true)
     setFeedback(null)
     setManualCopy('')
     try {
-      const created = await offerSeat(db, group, email, address)
-      setFeedback({ text: created ? 'Inbjudan är klar. Dela länken med ' + email.trim() + '.' : 'Det finns redan en giltig länk för den mejladressen. Du kan dela den igen.' })
-      setEmail('')
+      const created = await offerSeat(db, group, email, address, name, picture)
+      setFeedback({ text: created ? 'Inbjudan är klar. Dela länken med ' + email.trim() + '.' : 'Den tidigare inbjudan gäller fortfarande. Återkalla den först om du vill ändra namn eller bild.' })
+      if (created) { setEmail(''); setName(''); setPicture(undefined) }
     } catch (error) {
       setFeedback({ text: error instanceof InviteProblem ? error.message : 'Inbjudan kunde inte skapas. Kontrollera anslutningen och försök igen.', error: true })
     } finally {
@@ -142,17 +168,21 @@ function GroupInvites({ db, group, address }: { db: Firestore; group: FamilyGrou
       : seats === null ? <p role="status">Hämtar inbjudningarna …</p> : <>
         {free > 0 ? <form onSubmit={create}>
           <p>Varje person får en egen länk som gäller i sju dagar. Du väljer hur du delar den.</p>
+          <label htmlFor="invite-name">Visningsnamn i gruppen</label>
+          <input id="invite-name" required maxLength={50} disabled={busy} value={name} onChange={e => setName(e.target.value)} />
           <label htmlFor="invite-email">Personens mejladress</label>
           <input id="invite-email" type="email" maxLength={254} autoComplete="off" autoCapitalize="none" spellCheck={false}
-            required value={email} onChange={e => setEmail(e.target.value)} />
-          <button disabled={busy}>Skapa inbjudningslänk</button>
+            disabled={busy} required value={email} onChange={e => setEmail(e.target.value)} />
+          <PortraitChoice {...{ name, picture, editing, setEditing, busy }} change={setPicture} inviting />
+          <button disabled={busy || editing || !name.trim()}>Skapa inbjudningslänk</button>
         </form> : <p>{group.memberUids.length === group.capacity ? 'Nu är alla med!' : 'Varje ledig plats har en inbjudan. Du kan återkalla en länk för att frigöra en plats.'}</p>}
         {pending.length > 0 && <>
           <h3>Skapade inbjudningar</h3>
           <ul className="invite-list">{pending.map(seat => {
             const expired = seat.expiresAt.toMillis() <= now
             return <li key={seat.token}>
-              <strong>{seat.email}</strong>
+              <strong>{seat.displayName || seat.email}</strong>
+              {seat.displayName && <small>{seat.email}</small>}
               <small>{expired ? 'Länken har gått ut' : 'Gäller till ' + expiryFormat.format(seat.expiresAt.toDate())}</small>
               <div className="invite-actions">
                 {!expired && <>
